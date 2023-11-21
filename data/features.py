@@ -13,13 +13,13 @@ class FeaturesGenerator:
         self.ZPP4_DF = ZPP4_DF
         self.CONTRACTED_SPECS = pd.DataFrame()
         self.EXTRA_DATA_DIR = EXTRA_DATA_DIR if EXTRA_DATA_DIR is not None \
-            else 'data/extra_data/'
+            else '../data/extra_data/'
         self.FEATURES_PATH = self.EXTRA_DATA_DIR + FEATURES_PATH if FEATURES_PATH is not None \
             else self.EXTRA_DATA_DIR + 'features_to_use.json'
         self.TRANSFORMERS_DIR = TRANSFORMERS_DIR if TRANSFORMERS_DIR is not None \
-            else 'data/processed_data/transformers/'
+            else '../data/processed_data/transformers/'
         self.PROCESSED_DATA_DIR = PROCESSED_DATA_DIR if PROCESSED_DATA_DIR is not None \
-            else 'data/processed_data/'
+            else '../data/processed_data/'
         with open(self.FEATURES_PATH) as f:
             self.features_to_use = json.load(f)
         self.DATE_LIST = []
