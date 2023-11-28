@@ -1,5 +1,5 @@
 import numpy as np
-import pandas as pd
+# import pandas as pd
 from random import shuffle
 import torch
 from torch.utils.data import Dataset, Sampler
@@ -12,10 +12,10 @@ class TimeSeriesDataset(Dataset):
         self.series_cols = series_cols
         self.time_cols = time_cols
         self.specs = df['id'].unique()
-        self.supplier = [
-            df.loc[df['id'] == spec_id]['supplier'].iloc[0]
-            for spec_id in self.specs
-        ]
+        self.specs_date = [df.loc[df['id'] == spec_id]['last_date'].iloc[0]
+                           for spec_id in self.specs]
+        self.supplier = [df.loc[df['id'] == spec_id]['supplier'].iloc[0]
+                         for spec_id in self.specs]
 
     def __len__(self):
         return len(self.specs)
