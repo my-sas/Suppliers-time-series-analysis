@@ -48,6 +48,32 @@ class RepeatAutoencoder1(nn.Module):
         return output
 
 
+class BidirectionalAutoencoder(nn.Module):
+    """
+    Модель автоэнкодера. Декодер принимает на вход последовательность
+    из повторённых векторов с выхода энкодера.
+    """
+
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers=1):
+        super(BidirectionalAutoencoder, self).__init__()
+
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.output_dim = output_dim
+        self.num_layers = num_layers
+
+        self.encoder = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True)
+        self.decoder = nn.LSTM(hidden_dim, hidden_dim, num_layers, batch_first=True)
+        self.fc = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, X):
+        _, (hidden, _) = self.encoder(X)
+        hidden = hidden[-1].repeat(X.shape[1], 1, 1).permute(1, 0, 2)
+        output, _ = self.decoder(hidden)
+        output = self.fc(output)
+        return output
+
+
 class PositionalEncoding(nn.Module):
 
     def __init__(self, d_model: int, dropout: float = 0.01, max_len: int = 5000):
