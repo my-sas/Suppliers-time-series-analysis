@@ -5,7 +5,7 @@ import torch.nn as nn
 
 class RepeatAutoencoder(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_layers=1):
-        super(RepeatAutoencoder1, self).__init__()
+        super(RepeatAutoencoder, self).__init__()
 
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
@@ -152,3 +152,18 @@ class PositionalAutoencoder(nn.Module):
         output = self.fc(output)
 
         return output
+
+
+class LSTMSeq2One(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size):
+        super(LSTMSeq2One, self).__init__()
+        self.hidden_size = hidden_size
+
+        self.lstm = nn.LSTM(input_size, hidden_size)
+        self.fc = nn.Linear(hidden_size, output_size)
+
+    def forward(self, input_):
+        out, _ = self.lstm(input_)
+        out = self.fc(out[:, -1, :])
+        return out
+
