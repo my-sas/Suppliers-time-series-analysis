@@ -159,11 +159,12 @@ class LSTMSeq2One(nn.Module):
         super(LSTMSeq2One, self).__init__()
         self.hidden_size = hidden_size
 
-        self.lstm = nn.LSTM(input_size, hidden_size)
+        self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
         self.fc = nn.Linear(hidden_size, output_size)
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, input_):
-        out, _ = self.lstm(input_)
-        out = self.fc(out[:, -1, :])
+        _, (hidden, _) = self.lstm(input_)
+        out = self.fc(hidden[-1])
+        out = self.sigmoid(out)
         return out
-

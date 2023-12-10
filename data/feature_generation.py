@@ -1,7 +1,14 @@
+"""
+В модуле описаны функции для генерации данных о поставщике для спецификаций.
+Предполагается, что датафреймы прошли обработку preprocessing.
+"""
+
 import numpy as np
 
 
 def spec_preporarion(df):
+    """Кодирует и удаляет некоторые переменные таблицы ЦК
+    """
 
     # кодирование
     def status_func(x):
@@ -19,6 +26,42 @@ def spec_preporarion(df):
     trash_cols = ['item', 'basis', 'payment_terms', 'logistics']
     return df.drop(trash_cols, 1)
 
+
+def zpp4_preporarion(df):
+    """Генерирует переменные для поставок
+    и удаляет некоторые артефакты"""
+
+    def lateness_percentage(row):
+        if (row['delivery_period_end'] - row['spec_date']).days > 0:
+            # сколько прошло дней с начала спецификации
+            days_passed = max((row['date'] - row['spec_date']).days, 0)
+
+            # сколько дней длится спецификация
+            delivery_lenght = (row['delivery_period_end'] - row['spec_date']).days
+
+        # Если спецификация началась и закончилась в один день,
+        # то считаем длительность поставки равной одному дню,
+        # а к количеству прошедших дней прибавляем 1.
+        # Таким образом мы считаем, что спецификация начинается в начале указаного дня,
+        # а доставка и конец спецификации в конце указанного дня.
+        else:
+            days_passed = max((row['date'] - row['spec_date']).days + 1, 0)
+            delivery_lenght = 1
+
+        return days_passed / delivery_lenght
+
+    # На сколько поставщик близок к концу спецификации
+    df['lateness_percentage'] = df.apply(lambda row: lateness_percentage(row), axis=1)
+
+    # Доля уже доставленного товара от всего законтрактованого
+    df['weight_percentage'] = df.groupby('id')['quantity'].cumsum() / df['volume_contracted']
+
+    # удалить записи с нулевым volume_contracted
+    df = df.drop(df.loc[df['volume_contracted'] == 0].index)
+
+    # # дата последней поставки
+    # df['last_date'] = df.groupby(['id'])['date'].transform('max')
+    return df
 
 
 def past_agg(df, select_cols, id_col, time_col, select_rows=True, agg_func=np.mean):
@@ -47,8 +90,7 @@ def past_agg(df, select_cols, id_col, time_col, select_rows=True, agg_func=np.me
 
 def spec_agg_features(df):
     """Функция создаёт новые переменные для записей в spec (ЦК)
-    путём агрегации данных из прошлых спецификаций поставщика,
-    а также удаляет неинформативные колонки
+    путём агрегации данных из прошлых спецификаций поставщика.
     """
 
     df = spec_preporarion(df)
@@ -71,4 +113,30 @@ def spec_agg_features(df):
 
     # конверсия поставщика на момент спецификации
     df['conversion'] = past_agg(df, 'bids_contracted', 'supplier', 'spec_date')
+    return df
+
+
+def zpp4_agg_features(df, deliveries):
+    """Функция создаёт новые переменные для записей в spec (ЦК)
+    путём аггрегации данных по предыдущим поставкам поставщика.
+    """
+
+    deliveries = zpp4_preporarion(deliveries)
+
+    # агрегируем данные по посылкам (опоздал/не опоздал, есть ли недовес, средний процент изменения качества)
+    deliveries_agg = deliveries.groupby('id').agg({
+        'supplier': lambda x: x.iloc[0],
+        'delivery_period_end': lambda x: x.iloc[0],
+        'lateness_percentage': lambda x: int(x.max() > 1),
+        'weight_percentage': lambda x: int(x.max() < 1),
+        'price_change': 'mean'
+    }).rename(columns={
+        'lateness_percentage': 'late',
+        'weight_percentage': 'underweight'
+    })
+
+    # агрегируем данные по предыдущим поставкам поставщика
+    df[['lateness', 'underweight', 'price_change']] = df.apply(lambda row: deliveries_agg.loc[
+        (deliveries_agg['supplier'] == row['supplier']) & (deliveries_agg['delivery_period_end'] < row['spec_date'])] \
+        [['lateness', 'underweight', 'price_change']].mean(), axis=1)
     return df
