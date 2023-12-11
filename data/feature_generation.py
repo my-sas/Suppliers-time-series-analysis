@@ -4,6 +4,7 @@
 """
 
 import numpy as np
+import pandas as pd
 
 
 def spec_preporarion(df):
@@ -27,9 +28,14 @@ def spec_preporarion(df):
     return df.drop(trash_cols, 1)
 
 
-def zpp4_preporarion(df):
+def zpp4_preporarion(df, spec):
     """Генерирует переменные для поставок
     и удаляет некоторые артефакты"""
+
+    # для вычисления переменных необходимы данные о спецификации,
+    # такие как дата окончания спецификации и объём поставок
+    df = pd.merge(df, spec[['id', 'delivery_period_end', 'volume_contracted']], how='inner', on=['id', 'id'],
+                  suffixes=('', '_DROP'))
 
     def lateness_percentage(row):
         if (row['delivery_period_end'] - row['spec_date']).days > 0:
@@ -117,11 +123,13 @@ def spec_agg_features(df):
 
 
 def zpp4_agg_features(df, deliveries):
-    """Функция создаёт новые переменные для записей в spec (ЦК)
-    путём аггрегации данных по предыдущим поставкам поставщика.
+    """Функция создаёт в spec (ЦК) следующие переменные:
+    1) Как часто в среднем опаздывает поставщик;
+    2) Как часто у поставщика недовес;
+    3) На сколько в среднем качество хуже заявленного.
     """
 
-    deliveries = zpp4_preporarion(deliveries)
+    deliveries = zpp4_preporarion(deliveries, df)
 
     # агрегируем данные по посылкам (опоздал/не опоздал, есть ли недовес, средний процент изменения качества)
     deliveries_agg = deliveries.groupby('id').agg({
@@ -131,7 +139,7 @@ def zpp4_agg_features(df, deliveries):
         'weight_percentage': lambda x: int(x.max() < 1),
         'price_change': 'mean'
     }).rename(columns={
-        'lateness_percentage': 'late',
+        'lateness_percentage': 'lateness',
         'weight_percentage': 'underweight'
     })
 
@@ -139,4 +147,18 @@ def zpp4_agg_features(df, deliveries):
     df[['lateness', 'underweight', 'price_change']] = df.apply(lambda row: deliveries_agg.loc[
         (deliveries_agg['supplier'] == row['supplier']) & (deliveries_agg['delivery_period_end'] < row['spec_date'])] \
         [['lateness', 'underweight', 'price_change']].mean(), axis=1)
+    return df
+
+
+def zpp4_embed_agg(df):
+    """Функция агрегирует эмбеддинги поставок полученные через LSTM энкодер
+    """
+
+    # здесь используется заранее сделанная в LSTM.ipynb таблица с эмбеддингами
+    embed_df = pd.read_csv('../data/processed_data/embed_df.csv')
+    embed_df['date'] = pd.to_datetime(embed_df['date'], format='%Y-%m-%d')
+
+    df[embed_df.select_dtypes(include=[np.number]).columns] = df.apply(
+        lambda row: embed_df.loc[(embed_df['supplier'] == row['supplier']) & (embed_df['date'] < row['spec_date'])][
+            embed_df.select_dtypes(include=[np.number]).columns].mean(), axis=1)
     return df

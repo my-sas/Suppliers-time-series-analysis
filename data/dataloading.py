@@ -1,18 +1,21 @@
 import numpy as np
-# import pandas as pd
+import pandas as pd
 from random import shuffle
 import torch
 from torch.utils.data import Dataset, Sampler
 
+import sys
+import os
+sys.path.append(os.path.abspath('..'))
+from data.feature_generation import zpp4_preporarion
+
 
 class TimeSeriesDataset(Dataset):
-    def __init__(self, df, spec_cols, series_cols, time_cols):
+    def __init__(self, df):
         self.df = df
-        self.spec_cols = spec_cols
-        self.series_cols = series_cols
-        self.time_cols = time_cols
+
         self.specs = df['id'].unique()
-        self.specs_date = [df.loc[df['id'] == spec_id]['last_date'].iloc[0]
+        self.specs_date = [df.loc[df['id'] == spec_id]['delivery_period_end'].iloc[0]
                            for spec_id in self.specs]
         self.supplier = [df.loc[df['id'] == spec_id]['supplier'].iloc[0]
                          for spec_id in self.specs]
@@ -23,33 +26,22 @@ class TimeSeriesDataset(Dataset):
     def __getitem__(self, idx):
         data = self.df.loc[self.df['id'] == self.specs[idx]]
 
-        h = torch.tensor(data[self.spec_cols].iloc[0].values, dtype=torch.float)
-        x = torch.tensor(data[self.series_cols].values, dtype=torch.float)
-        t = torch.tensor(data[self.time_cols].values, dtype=torch.float)
+        x = torch.tensor(data[['lateness_percentage', 'weight_percentage', 'price_change']].values, dtype=torch.float)
 
-        return h, x, t
+        return x
 
 
 def pad_collate(batch):
-    max_len = max([len(sample[1]) for sample in batch])
+    max_len = max([len(sample) for sample in batch])
     new_batch = []
     for sample in batch:
-        repeat_n = max_len - len(sample[1])
+        repeat_n = max_len - len(sample)
+        sample_x = torch.cat((sample, sample[-1].unsqueeze(0).repeat(repeat_n, 1)))
 
-        sample_h = sample[0]
-        sample_x = torch.cat((sample[1], sample[1][-1].unsqueeze(0).repeat(repeat_n, 1)))
-        sample_t = torch.cat((sample[2], sample[2][-1].unsqueeze(0).repeat(repeat_n, 1)))
+        new_batch.append(sample_x)
 
-        new_batch.append((
-            sample_h,
-            sample_x,
-            sample_t
-        ))
-
-    h = torch.stack([sample[0] for sample in new_batch])
-    x = torch.stack([sample[1] for sample in new_batch])
-    t = torch.stack([sample[2] for sample in new_batch])
-    return h, x, t
+    x = torch.stack(new_batch)
+    return x
 
 
 class SequenceLengthSampler(Sampler):
@@ -94,3 +86,25 @@ class SequenceLengthSampler(Sampler):
             np.less(seq_length, buckets_max))
         bucket_id = np.min(np.where(conditions_c))
         return bucket_id
+
+
+def load_dataset():
+    # таблица со спецификациями
+    spec = pd.read_csv('../data/processed_data/specs.csv')
+    spec['spec_date'] = pd.to_datetime(spec['spec_date'], format='%Y-%m-%d')
+    spec['delivery_period_end'] = pd.to_datetime(spec['delivery_period_end'], format='%Y-%m-%d')
+
+    # таблица с доставками
+    zpp4 = pd.read_csv('../data/processed_data/zpp4.csv')
+    zpp4['date'] = pd.to_datetime(zpp4['date'], format='%Y-%m-%d')
+    zpp4['spec_date'] = pd.to_datetime(zpp4['spec_date'], format='%Y-%m-%d')
+
+    # генерация переменных
+    zpp4 = zpp4_preporarion(zpp4, spec)
+
+    # преобразования для загрузки в модель
+    zpp4 = zpp4[['id', 'supplier', 'delivery_period_end', 'lateness_percentage', 'weight_percentage', 'price_change']]
+    zpp4['price_change'] = zpp4['price_change'] * 0.4
+
+    dataset = TimeSeriesDataset(zpp4)
+    return dataset
