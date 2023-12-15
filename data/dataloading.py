@@ -1,3 +1,7 @@
+"""
+Модуль содержит функции и классы для загрузки данных для pytorch моделей
+"""
+
 import numpy as np
 import pandas as pd
 from random import shuffle
@@ -11,6 +15,11 @@ from data.feature_generation import zpp4_preporarion
 
 
 class TimeSeriesDataset(Dataset):
+    """Класс для загрузки данных из датафрейма для обучения автоэнкодера.
+
+    Attributes:
+        df (pd.DataFrame): Датафрейм с предобработанными данными
+    """
     def __init__(self, df):
         self.df = df
 
@@ -32,6 +41,7 @@ class TimeSeriesDataset(Dataset):
 
 
 def pad_collate(batch):
+    """Функция добавляет паддинг к элементам в batch"""
     max_len = max([len(sample) for sample in batch])
     new_batch = []
     for sample in batch:
@@ -45,6 +55,9 @@ def pad_collate(batch):
 
 
 class SequenceLengthSampler(Sampler):
+    """Функция семплирует данные по поставкам по количеству записей.
+    Это необходимо для уменьшения количества паддингов.
+    """
 
     def __init__(self, ind_n_len, bucket_boundaries, batch_size=64, ):
         self.ind_n_len = ind_n_len
@@ -89,6 +102,9 @@ class SequenceLengthSampler(Sampler):
 
 
 def load_dataset():
+    """Функция для загрузки и подготовки данных о поставках.
+    """
+
     # таблица со спецификациями
     spec = pd.read_csv('../data/processed_data/specs.csv')
     spec['spec_date'] = pd.to_datetime(spec['spec_date'], format='%Y-%m-%d')
@@ -102,8 +118,11 @@ def load_dataset():
     # генерация переменных
     zpp4 = zpp4_preporarion(zpp4, spec)
 
-    # преобразования для загрузки в модель
+    # выбираем колонки, которые будут участвовать в обучении, либо
+    # колонки идентифкаторы ('id', 'supplier')
     zpp4 = zpp4[['id', 'supplier', 'delivery_period_end', 'lateness_percentage', 'weight_percentage', 'price_change']]
+
+    # масштабируем переменную перед обучением модели
     zpp4['price_change'] = zpp4['price_change'] * 0.4
 
     dataset = TimeSeriesDataset(zpp4)

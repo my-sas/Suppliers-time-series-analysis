@@ -4,6 +4,9 @@ import torch.nn as nn
 
 
 class RepeatAutoencoder(nn.Module):
+    """Модель LSTM-автоэнкодера, выполненная по схеме из статьи:
+    https://arxiv.org/pdf/2204.06701.pdf
+    """
     def __init__(self, input_dim, hidden_dim, output_dim, num_layers=1):
         super(RepeatAutoencoder, self).__init__()
 
@@ -89,6 +92,9 @@ class BidirectionalDecoder(nn.Module):
 
 
 class BidirectionalAutoencoder(nn.Module):
+    """Модель LSTM-автоэнкодера, выполненная по схеме из статьи:
+    https://link.springer.com/content/pdf/10.1007/978-3-030-47426-3_25.pdf
+    """
     def __init__(self, input_dim, hidden_dim, output_dim, num_layers=1):
         super(BidirectionalAutoencoder, self).__init__()
 
