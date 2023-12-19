@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 
-def spec_preporarion(df):
+def spec_preporarion(df, zpp4):
     """Кодирует и удаляет некоторые переменные таблицы ЦК
     """
 
@@ -25,11 +25,27 @@ def spec_preporarion(df):
 
     # неинформативные колонки
     trash_cols = ['item', 'basis', 'payment_terms', 'logistics']
-    return df.drop(trash_cols, 1)
+    df = df.drop(trash_cols, axis=1)
+
+    # Дополнительные целевые переменные
+
+    # опоздал или нет
+    df['is_late'] = df.apply(lambda row: int(deliveries['date'].max() > row['delivery_period_end']) if len(
+        (deliveries := zpp4[zpp4['id'] == row['id']])) > 0 else np.nan, axis=1)
+
+    # был ли недовес
+    df['is_underweight'] = df.apply(
+        lambda row: int((deliveries['quantity'].sum() / row['volume_contracted']) < 1) if len(
+            (deliveries := zpp4[zpp4['id'] == row['id']])) > 0 else np.nan, axis=1)
+
+    # окозалось ли качество хуже более чем на 5%
+    df['is_poorquality'] = df.apply(lambda row: int(((deliveries['quantity'] / row['volume_contracted']) * deliveries[
+        'price_change']).sum() < -5) if len((deliveries := zpp4[zpp4['id'] == row['id']])) > 0 else np.nan, axis=1)
+    return df
 
 
 def zpp4_preporarion(df, spec):
-    """Генерирует переменные для поставок
+    """Генерирует НАКОПИТЕЛЬНЫЕ переменные для поставок
     и удаляет некоторые артефакты"""
 
     # для вычисления переменных необходимы данные о спецификации,
@@ -62,12 +78,57 @@ def zpp4_preporarion(df, spec):
     # Доля уже доставленного товара от всего законтрактованого
     df['weight_percentage'] = df.groupby('id')['quantity'].cumsum() / df['volume_contracted']
 
+    # процент количества на процент качества (сумма по поставке даст средний процент изменения качества)
+    df['relative_price_change'] = (df['quantity'] / df['volume_contracted']) * df['price_change']
+
     # удалить записи с нулевым volume_contracted
     df = df.drop(df.loc[df['volume_contracted'] == 0].index)
 
-    # # дата последней поставки
-    # df['last_date'] = df.groupby(['id'])['date'].transform('max')
+    # дата последней поставки
+    df['last_date'] = df.groupby(['id'])['date'].transform('max')
     return df
+
+
+# def zpp4_preporarion_v2(df, spec):
+#     """Генерирует переменные для поставок
+#     и удаляет некоторые артефакты"""
+#
+#     # для вычисления переменных необходимы данные о спецификации,
+#     # такие как дата окончания спецификации и объём поставок
+#     df = pd.merge(df, spec[['id', 'delivery_period_end', 'volume_contracted']], how='inner', on=['id', 'id'],
+#                   suffixes=('', '_DROP'))
+#
+#     def lateness_percentage(row):
+#         if (row['delivery_period_end'] - row['spec_date']).days > 0:
+#             # сколько прошло дней с начала спецификации
+#             days_passed = max((row['date'] - row['spec_date']).days, 0)
+#
+#             # сколько дней длится спецификация
+#             delivery_lenght = (row['delivery_period_end'] - row['spec_date']).days
+#
+#         # Если спецификация началась и закончилась в один день,
+#         # то считаем длительность поставки равной одному дню,
+#         # а к количеству прошедших дней прибавляем 1.
+#         # Таким образом мы считаем, что спецификация начинается в начале указаного дня,
+#         # а доставка и конец спецификации в конце указанного дня.
+#         else:
+#             days_passed = max((row['date'] - row['spec_date']).days + 1, 0)
+#             delivery_lenght = 1
+#
+#         return days_passed / delivery_lenght
+#
+#     # На сколько поставщик близок к концу спецификации
+#     df['lateness_percentage'] = df.apply(lambda row: lateness_percentage(row), axis=1)
+#
+#     # Доля уже доставленного товара от всего законтрактованого
+#     df['weight_percentage'] = df['quantity'] / df['volume_contracted']
+#
+#     # удалить записи с нулевым volume_contracted
+#     df = df.drop(df.loc[df['volume_contracted'] == 0].index)
+#
+#     # # дата последней поставки
+#     # df['last_date'] = df.groupby(['id'])['date'].transform('max')
+#     return df
 
 
 def past_agg(df, select_cols, id_col, time_col, select_rows=True, agg_func=np.mean):
@@ -94,12 +155,12 @@ def past_agg(df, select_cols, id_col, time_col, select_rows=True, agg_func=np.me
     return df.apply(func, axis=1)
 
 
-def spec_agg_features(df):
+def spec_agg_features(df, zpp4):
     """Функция создаёт новые переменные для записей в spec (ЦК)
     путём агрегации данных из прошлых спецификаций поставщика.
     """
 
-    df = spec_preporarion(df)
+    df = spec_preporarion(df, zpp4)
 
     # средняя продолжительность предыдущих законтрактованных спецификаций поставщика
     df['mean_delivery_length'] = past_agg(df, 'delivery_length', 'supplier', 'spec_date',
@@ -131,20 +192,21 @@ def zpp4_agg_features(df, deliveries):
 
     deliveries = zpp4_preporarion(deliveries, df)
 
-    # агрегируем данные по посылкам (опоздал/не опоздал, есть ли недовес, средний процент изменения качества)
+    # агрегируем данные по посылкам
     deliveries_agg = deliveries.groupby('id').agg({
         'supplier': lambda x: x.iloc[0],
         'delivery_period_end': lambda x: x.iloc[0],
-        'lateness_percentage': lambda x: int(x.max() > 1),
-        'weight_percentage': lambda x: int(x.max() < 1),
-        'price_change': 'mean'
+        'lateness_percentage': lambda x: x.max(),
+        'weight_percentage': lambda x: 1 - x.max(),
+        'relative_price_change': 'sum'
     }).rename(columns={
         'lateness_percentage': 'lateness',
-        'weight_percentage': 'underweight'
+        'weight_percentage': 'underweight',
+        'relative_price_change': 'price_change'
     })
 
     # агрегируем данные по предыдущим поставкам поставщика
-    df[['lateness', 'underweight', 'price_change']] = df.apply(lambda row: deliveries_agg.loc[
+    df[['supplier_lateness', 'supplier_underweight', 'supplier_price_change']] = df.apply(lambda row: deliveries_agg.loc[
         (deliveries_agg['supplier'] == row['supplier']) & (deliveries_agg['delivery_period_end'] < row['spec_date'])] \
         [['lateness', 'underweight', 'price_change']].mean(), axis=1)
     return df
