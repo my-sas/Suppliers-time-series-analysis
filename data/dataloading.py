@@ -11,7 +11,7 @@ from torch.utils.data import Dataset, Sampler
 import sys
 import os
 sys.path.append(os.path.abspath('..'))
-from data.feature_generation import zpp4_preporarion
+from data.feature_generation import zpp4_preporarion, zpp4_preporarion2
 
 
 class TimeSeriesDataset(Dataset):
@@ -20,8 +20,9 @@ class TimeSeriesDataset(Dataset):
     Attributes:
         df (pd.DataFrame): Датафрейм с предобработанными данными
     """
-    def __init__(self, df):
+    def __init__(self, df, learn_cols):
         self.df = df
+        self.learn_cols = learn_cols
 
         self.specs = df['id'].unique()
         self.specs_date = [df.loc[df['id'] == spec_id]['delivery_period_end'].iloc[0]
@@ -35,7 +36,7 @@ class TimeSeriesDataset(Dataset):
     def __getitem__(self, idx):
         data = self.df.loc[self.df['id'] == self.specs[idx]]
 
-        x = torch.tensor(data[['lateness_percentage', 'weight_percentage', 'price_change']].values, dtype=torch.float)
+        x = torch.tensor(data[self.learn_cols].values, dtype=torch.float)
 
         return x
 
@@ -125,5 +126,32 @@ def load_dataset():
     # масштабируем переменную перед обучением модели
     zpp4['price_change'] = zpp4['price_change'] * 0.4
 
-    dataset = TimeSeriesDataset(zpp4)
+    dataset = TimeSeriesDataset(zpp4, learn_cols=['lateness_percentage', 'weight_percentage', 'price_change'])
+    return dataset
+
+def load_dataset2():
+    """Функция для загрузки и подготовки данных о поставках.
+    """
+
+    # таблица со спецификациями
+    spec = pd.read_csv('../data/processed_data/specs.csv')
+    spec['spec_date'] = pd.to_datetime(spec['spec_date'], format='%Y-%m-%d')
+    spec['delivery_period_end'] = pd.to_datetime(spec['delivery_period_end'], format='%Y-%m-%d')
+
+    # таблица с доставками
+    zpp4 = pd.read_csv('../data/processed_data/zpp4.csv')
+    zpp4['date'] = pd.to_datetime(zpp4['date'], format='%Y-%m-%d')
+    zpp4['spec_date'] = pd.to_datetime(zpp4['spec_date'], format='%Y-%m-%d')
+
+    # генерация переменных
+    zpp4 = zpp4_preporarion2(zpp4, spec)
+
+    # выбираем колонки, которые будут участвовать в обучении и
+    # колонки идентифкаторы ('id', 'supplier')
+    zpp4 = zpp4[['id', 'supplier', 'delivery_period_end', 'time_persentage', 'weight_percentage', 'price_change']]
+
+    # масштабируем переменную перед обучением модели
+    zpp4['price_change'] = (zpp4['price_change'] + 5) * 0.01
+
+    dataset = TimeSeriesDataset(zpp4, learn_cols=['time_persentage', 'weight_percentage', 'price_change'])
     return dataset

@@ -53,6 +53,8 @@ PROCESSED_ZPP4_PATH = '../data/processed_data/zpp4.csv'
 
 FINAL_DATA_PATH = '../data/final_data/spec.csv'
 
+EMBED_PATH = '../data/processed_data/embed_df2.csv'
+
 
 def spec_preporarion(df, zpp4):
     """Кодирует и удаляет некоторые переменные таблицы ЦК,
@@ -137,6 +139,54 @@ def zpp4_preporarion(df, spec):
     return df
 
 
+def zpp4_preporarion2(zpp4, spec):
+    """Генерирует НЕ НАКОПИТЕЛЬНЫЕ переменные для поставок
+    и удаляет некоторые артефакты"""
+
+    # для вычисления переменных необходимы данные о спецификации,
+    # такие как дата окончания спецификации и объём поставок
+    zpp4 = pd.merge(zpp4, spec[['id', 'delivery_period_end', 'volume_contracted']], how='inner', on=['id', 'id'],
+                    suffixes=('', '_DROP'))
+
+    def days_diff(series):
+        dates = series.unique().astype('datetime64')
+        dates.sort()
+
+        days_diff = (dates[1:] - dates[:-1]).astype('timedelta64[D]').astype(int)
+        days_diff = np.insert(days_diff, 0, -1)
+
+        dates = dates.astype('datetime64[us]')
+        dates_dict = {k: v for (k, v) in zip(dates, days_diff)}
+
+        return series.map(lambda x: dates_dict[np.datetime64(x)])
+
+    # продолжительность поставки
+    zpp4['delivery_length'] = (zpp4['delivery_period_end'] - zpp4['spec_date']).map(lambda x: x.days)
+
+    # 0 заменяем на 1
+    zpp4['delivery_length'] = zpp4['delivery_length'].map(lambda x: (1 if x == 0 else x))
+
+    # сколько дней прошло с прошлых поставок
+    zpp4['days_diff'] = zpp4.groupby('id')['date'].transform(lambda x: days_diff(x))
+
+    # если первая поставка, считаем сколько дней прошло с начала спецификации
+    zpp4['days_diff'] = zpp4.apply(
+        lambda row: (row['days_diff'] if row['days_diff'] != -1 else (row['date'] - row['spec_date']).days), axis=1)
+
+    # переводим в проценты
+    zpp4['time_persentage'] = zpp4['days_diff'] / zpp4['delivery_length']
+
+    # процент доставленного товара
+    zpp4['weight_percentage'] = zpp4['quantity'] / zpp4['volume_contracted']
+
+    # удалить записи с нулевым volume_contracted
+    zpp4 = zpp4.drop(zpp4.loc[zpp4['volume_contracted'] == 0].index)
+
+    # дата последней поставки
+    zpp4['last_date'] = zpp4.groupby(['id'])['date'].transform('max')
+    return zpp4
+
+
 def past_agg(df, select_cols, id_col, time_col, select_rows=True, agg_func=np.mean):
     """Возвращает агрегацию для объектов из id_col,
     из записей которые были раньше по времени
@@ -161,7 +211,7 @@ def past_agg(df, select_cols, id_col, time_col, select_rows=True, agg_func=np.me
     return df.apply(func, axis=1)
 
 
-def spec_agg_features(spec, zpp4):
+def spec_features(spec, zpp4):
     """Функция создаёт новые переменные для записей в spec (ЦК)
     путём агрегации данных из прошлых спецификаций поставщика.
     """
@@ -187,7 +237,7 @@ def spec_agg_features(spec, zpp4):
     return spec
 
 
-def zpp4_agg_features(spec, zpp4):
+def zpp4_features(spec, zpp4):
     """Функция создаёт в spec (ЦК) следующие переменные:
     1) Как часто в среднем опаздывает поставщик;
     2) Как часто у поставщика недовес;
@@ -214,12 +264,12 @@ def zpp4_agg_features(spec, zpp4):
     return spec
 
 
-def zpp4_embed_agg(df):
+def embed_features(df):
     """Функция агрегирует эмбеддинги поставок полученные через LSTM энкодер
     """
 
     # здесь используется заранее сделанная в train_LSTM.ipynb таблица с эмбеддингами
-    embed_df = pd.read_csv('../data/processed_data/embed_df.csv')
+    embed_df = pd.read_csv(EMBED_PATH)
     embed_df['date'] = pd.to_datetime(embed_df['date'], format='%Y-%m-%d')
 
     df[embed_df.select_dtypes(include=[np.number]).columns] = df.apply(
@@ -250,13 +300,13 @@ def pipeline():
     zpp4 = zpp4_preporarion(zpp4, spec)
 
     # фичи аггрегации параметров прошлых поставок
-    spec = zpp4_agg_features(spec, zpp4)
+    spec = zpp4_features(spec, zpp4)
 
     # фичи эмбеддинги
-    spec = zpp4_embed_agg(spec)
+    spec = embed_features(spec)
 
     # агрегация из прошлых спецификаций
-    spec = spec_agg_features(spec, zpp4)
+    spec = spec_features(spec, zpp4)
 
     return spec[
         ['supplier', 'id', 'spec_date', 'delivery_period_end'] +  # служебные
