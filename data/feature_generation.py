@@ -53,10 +53,10 @@ PROCESSED_ZPP4_PATH = '../data/processed_data/zpp4.csv'
 
 FINAL_DATA_PATH = '../data/final_data/spec.csv'
 
-EMBED_PATH = '../data/processed_data/embed_df2.csv'
+EMBED_PATH = '../data/processed_data/embed_df.csv'
 
 
-def spec_preporarion(df, zpp4):
+def spec_preporarion(spec, zpp4):
     """Кодирует и удаляет некоторые переменные таблицы ЦК,
     также генерируются дополнительные целевые переменные
     """
@@ -68,30 +68,30 @@ def spec_preporarion(df, zpp4):
         if x == 'Трейдер':
             return 0
         return 0.5
-    df['supplier_status'] = df['supplier_status'].map(status_func)
+    spec['supplier_status'] = spec['supplier_status'].map(status_func)
 
     # продолжительность спецификации
-    df['delivery_length'] = (df['delivery_period_end'] - df['spec_date']).map(lambda x: x.days)
+    spec['delivery_length'] = (spec['delivery_period_end'] - spec['spec_date']).map(lambda x: x.days)
 
     # неинформативные колонки
     trash_cols = ['item', 'basis', 'payment_terms', 'logistics']
-    df = df.drop(trash_cols, axis=1)
+    spec = spec.drop(trash_cols, axis=1)
 
     # Дополнительные целевые переменные
 
     # опоздал или нет
-    df['is_late'] = df.apply(lambda row: int(deliveries['date'].max() > row['delivery_period_end']) if len(
+    spec['is_late'] = spec.apply(lambda row: int(deliveries['date'].max() > row['delivery_period_end']) if len(
         (deliveries := zpp4[zpp4['id'] == row['id']])) > 0 else np.nan, axis=1)
 
     # был ли недовес
-    df['is_underweight'] = df.apply(
+    spec['is_underweight'] = spec.apply(
         lambda row: int((deliveries['quantity'].sum() / row['volume_contracted']) < 1) if len(
             (deliveries := zpp4[zpp4['id'] == row['id']])) > 0 else np.nan, axis=1)
 
     # окозалось ли качество хуже более чем на 5%
-    df['is_poorquality'] = df.apply(lambda row: int(((deliveries['quantity'] / row['volume_contracted']) * deliveries[
+    spec['is_poorquality'] = spec.apply(lambda row: int(((deliveries['quantity'] / row['volume_contracted']) * deliveries[
         'price_change']).sum() < -5) if len((deliveries := zpp4[zpp4['id'] == row['id']])) > 0 else np.nan, axis=1)
-    return df
+    return spec
 
 
 def zpp4_preporarion(df, spec):
@@ -317,6 +317,7 @@ def pipeline():
          'mean_volume', 'volume_diff', 'conversion'] +
         [str(i) for i in range(16)]  # эмбеддинг поставщика
     ]
+
 
 if __name__ == "__main__":
     spec = pipeline()
